@@ -292,9 +292,9 @@ function App(){
 async function generateImage(prompt, filename, dirHandle) {
   const key = localStorage.getItem("openai_api_key");
   if (!key) throw new Error("APIキー未設定");
-  const res = await fetch("https://api.openai.com/v1/images/generations", {
+  const res = await fetch(PROXY_URL+"/openai-image", {
     method: "POST",
-    headers: {"Content-Type":"application/json","Authorization":"Bearer "+key},
+    headers: {"Content-Type":"application/json"},
     body: JSON.stringify({model:"dall-e-3",prompt:prompt,n:1,size:"1792x1024",quality:"standard",response_format:"url"})
   });
   if (!res.ok) {const e=await res.json();throw new Error(e.error?.message||"API Error");}
@@ -383,7 +383,7 @@ function ImageGenPanel({articles}) {
           <button onClick={()=>setKeyVisible(!keyVisible)} style={{padding:"8px 10px",borderRadius:8,background:C2.surface,border:"1px solid "+C2.border,cursor:"pointer",fontSize:11,color:C2.dim}}>{keyVisible?"🙈":"👁"}</button>
           <button onClick={saveKey} style={{padding:"8px 14px",borderRadius:8,background:C2.green,color:"#fff",fontWeight:700,fontSize:11,border:"none",cursor:"pointer"}}>保存</button>
         </div>
-        <div style={{fontSize:10,color:C2.muted,marginTop:3}}>キーはブラウザのlocalStorageに保存。1枚約¥6〜12円（standard/HD）</div>
+        <div style={{fontSize:10,color:C2.muted,marginTop:3}}>※ APIキーはCloudflare Workerの環境変数で管理。ここでの入力は不要です。</div>
       </div>
 
       {/* フォルダ選択 */}
