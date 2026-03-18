@@ -158,6 +158,8 @@ function App(){
           {running&&<div style={{marginTop:10,height:5,background:C.border,borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:(progress/count*100)+"%",background:"linear-gradient(90deg,"+C.accent+","+C.green+")",transition:"width 0.5s",borderRadius:3}}/></div>}
         </div>
 
+        {articles.length>0&&<ImageGenPanel articles={articles}/>}
+
         {articles.length>0&&(
           <div style={{marginBottom:16}}>
             <div style={{fontSize:12,fontWeight:700,color:C.dim,marginBottom:8,display:"flex",alignItems:"center",gap:10}}>
@@ -278,6 +280,152 @@ function App(){
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+
+/* ══════════════════════════════════════════
+   DALL-E 3 自動画像生成 + フォルダ保存
+══════════════════════════════════════════ */
+
+async function generateImage(prompt, filename, dirHandle) {
+  const key = localStorage.getItem("openai_api_key");
+  if (!key) throw new Error("APIキー未設定");
+  const res = await fetch("https://api.openai.com/v1/images/generations", {
+    method: "POST",
+    headers: {"Content-Type":"application/json","Authorization":"Bearer "+key},
+    body: JSON.stringify({model:"dall-e-3",prompt:prompt,n:1,size:"1792x1024",quality:"standard",response_format:"url"})
+  });
+  if (!res.ok) {const e=await res.json();throw new Error(e.error?.message||"API Error");}
+  const data = await res.json();
+  const imgUrl = data.data[0].url;
+  // 画像をfetchしてバイナリに変換
+  const imgRes = await fetch(imgUrl);
+  const blob = await imgRes.blob();
+  // フォルダに保存
+  if (dirHandle) {
+    const fileHandle = await dirHandle.getFileHandle(filename, {create:true});
+    const writable = await fileHandle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+  } else {
+    // フォルダ未選択の場合はダウンロード
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href=url; a.download=filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+  return imgUrl;
+}
+
+function ImageGenPanel({articles}) {
+  const [apiKey, setApiKey] = React.useState(()=>localStorage.getItem("openai_api_key")||"");
+  const [keyVisible, setKeyVisible] = React.useState(false);
+  const [dirHandle, setDirHandle] = React.useState(null);
+  const [running, setRunning] = React.useState(false);
+  const [progress, setProgress] = React.useState(0);
+  const [log, setLog] = React.useState([]);
+  const [useNoText, setUseNoText] = React.useState(true);
+
+  const saveKey = () => {
+    localStorage.setItem("openai_api_key", apiKey);
+    alert("APIキーを保存しました");
+  };
+
+  const pickFolder = async () => {
+    try {
+      const handle = await window.showDirectoryPicker({mode:"readwrite"});
+      setDirHandle(handle);
+    } catch(e) { console.log("フォルダ選択キャンセル"); }
+  };
+
+  const runAll = async () => {
+    if (!localStorage.getItem("openai_api_key")) { alert("OpenAI APIキーを先に保存してください"); return; }
+    if (articles.length === 0) { alert("先に記事を生成してください"); return; }
+    setRunning(true); setProgress(0); setLog([]);
+    const addLog = (msg) => setLog(prev=>[...prev, msg]);
+
+    for (let i=0; i<articles.length; i++) {
+      const art = articles[i];
+      const prompt = useNoText ? art.img_prompt_no_text : art.img_prompt_with_text;
+      const suffix = useNoText ? "notxt" : "txt";
+      const filename = "thumbnail_"+String(i+1).padStart(3,"0")+"_"+(art._isFail?"fail":"note")+"_"+suffix+".png";
+      if (!prompt) { addLog("⚠ #"+(i+1)+" プロンプトなし — スキップ"); setProgress(i+1); continue; }
+      try {
+        addLog("🔄 #"+(i+1)+" 生成中: "+art.title?.substring(0,20)+"...");
+        await generateImage(prompt, filename, dirHandle);
+        addLog("✅ #"+(i+1)+" 保存: "+filename);
+      } catch(e) {
+        addLog("❌ #"+(i+1)+" エラー: "+e.message);
+      }
+      setProgress(i+1);
+      // レート制限対策: 1枚ごとに2秒待機
+      if (i < articles.length-1) await new Promise(r=>setTimeout(r,2000));
+    }
+    setRunning(false);
+    addLog("🎉 完了！ "+articles.length+"枚処理しました");
+  };
+
+  const C2 = {accent:"#c05a2e",accentDark:"#9e4623",fail:"#7c5cbf",green:"#3a8f6e",
+    card:"#fff",surface:"#faf7f2",border:"#e0d8d0",text:"#1a1a1a",dim:"#555",muted:"#999"};
+
+  return (
+    <div style={{background:C2.card,borderRadius:16,border:"1px solid "+C2.border,padding:20,marginBottom:16}}>
+      <div style={{fontSize:12,fontWeight:700,color:C2.accent,marginBottom:14,letterSpacing:"0.08em"}}>🖼 DALL-E 3 一括画像生成</div>
+
+      {/* APIキー設定 */}
+      <div style={{marginBottom:12}}>
+        <label style={{fontSize:11,color:C2.dim,display:"block",marginBottom:4}}>OpenAI APIキー（platform.openai.com）</label>
+        <div style={{display:"flex",gap:6}}>
+          <input type={keyVisible?"text":"password"} value={apiKey} onChange={e=>setApiKey(e.target.value)}
+            placeholder="sk-proj-..." style={{flex:1,padding:"8px 10px",borderRadius:8,border:"1px solid "+C2.border,background:C2.surface,fontSize:12,color:C2.text,fontFamily:"monospace"}}/>
+          <button onClick={()=>setKeyVisible(!keyVisible)} style={{padding:"8px 10px",borderRadius:8,background:C2.surface,border:"1px solid "+C2.border,cursor:"pointer",fontSize:11,color:C2.dim}}>{keyVisible?"🙈":"👁"}</button>
+          <button onClick={saveKey} style={{padding:"8px 14px",borderRadius:8,background:C2.green,color:"#fff",fontWeight:700,fontSize:11,border:"none",cursor:"pointer"}}>保存</button>
+        </div>
+        <div style={{fontSize:10,color:C2.muted,marginTop:3}}>キーはブラウザのlocalStorageに保存。1枚約¥6〜12円（standard/HD）</div>
+      </div>
+
+      {/* フォルダ選択 */}
+      <div style={{marginBottom:12}}>
+        <label style={{fontSize:11,color:C2.dim,display:"block",marginBottom:4}}>保存先フォルダ</label>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <button onClick={pickFolder} style={{padding:"8px 16px",borderRadius:8,background:C2.surface,border:"1px solid "+C2.border,cursor:"pointer",fontSize:12,color:C2.dim,fontWeight:600}}>
+            📁 フォルダを選択
+          </button>
+          <span style={{fontSize:12,color:dirHandle?C2.green:C2.muted}}>
+            {dirHandle ? "✅ "+dirHandle.name+"（選択済み）" : "未選択（選択しないと1枚ずつダウンロード）"}
+          </span>
+        </div>
+      </div>
+
+      {/* プロンプト種別 */}
+      <div style={{marginBottom:14,display:"flex",gap:8}}>
+        {[["テキストなし版（汎用）",true],["テキストあり版（noteサムネ専用）",false]].map(([label,val])=>(
+          <button key={String(val)} onClick={()=>setUseNoText(val)} style={{padding:"6px 14px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",
+            background:useNoText===val?C2.accent:C2.surface,color:useNoText===val?"#fff":C2.dim,
+            border:"1px solid "+(useNoText===val?C2.accent:C2.border)}}>{label}</button>
+        ))}
+      </div>
+
+      {/* 実行ボタン */}
+      <button onClick={runAll} disabled={running||articles.length===0} style={{width:"100%",padding:"13px 0",borderRadius:12,background:running?C2.muted:"linear-gradient(135deg,"+C2.accent+","+C2.accentDark+")",color:"#fff",fontWeight:800,fontSize:14,border:"none",cursor:running?"not-allowed":"pointer",marginBottom:10,boxShadow:running?"none":"0 4px 20px rgba(192,90,46,0.3)"}}>
+        {running ? "🔄 生成中... "+progress+"/"+articles.length+"枚" : "🚀 ワンクリックで全"+articles.length+"枚を生成・保存"}
+      </button>
+
+      {/* プログレスバー */}
+      {running && articles.length>0 && (
+        <div style={{height:5,background:C2.border,borderRadius:3,overflow:"hidden",marginBottom:10}}>
+          <div style={{height:"100%",width:(progress/articles.length*100)+"%",background:"linear-gradient(90deg,"+C2.accent+","+C2.green+")",transition:"width 0.5s",borderRadius:3}}/>
+        </div>
+      )}
+
+      {/* ログ */}
+      {log.length>0 && (
+        <div style={{maxHeight:160,overflowY:"auto",padding:"8px 10px",borderRadius:8,background:C2.surface,border:"1px solid "+C2.border,fontSize:11,color:C2.dim,lineHeight:1.8,fontFamily:"monospace"}}>
+          {log.map((l,i)=><div key={i}>{l}</div>)}
+        </div>
+      )}
     </div>
   );
 }
