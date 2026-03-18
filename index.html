@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>コンテンツ機関銃 | AIの町医者</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>* { margin:0; padding:0; box-sizing:border-box; } body { font-family:'Noto Sans JP',sans-serif; background:#f5f0e8; }</style>
+</head>
+<body>
+<div id="root"></div>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script type="text/babel">
+const {useState,useCallback} = React;
+
+const PROXY_URL = "https://aisdr-proxy.hdxrope.workers.dev";
+const SDR_URL = "https://hideo-t.github.io/aidoctor/sdr/";
+
+const ANGLES = [
+  {id:"story",label:"体験談",icon:"📖"},{id:"industry",label:"業種別",icon:"🏭"},
+  {id:"number",label:"数字",icon:"📊"},{id:"fail",label:"失敗談",icon:"💥"},
+  {id:"phil",label:"哲学",icon:"🧠"},{id:"local",label:"地域",icon:"🗾"},
+  {id:"how",label:"ハウツー",icon:"🔧"},{id:"future",label:"未来予測",icon:"🚀"},
+];
+const INDUSTRIES = ["飲食店","建設業","不動産業","介護・福祉","小売業","美容サロン","農業","製造業","士業","整骨院・整体"];
+
+const SYSTEM = `あなたは「AIの町医者」高橋秀夫（56歳、福島・沖縄二拠点、AI活用コンサル）の代筆ライターです。
+【プロフィール】30年ぶりにITに復帰。RTX5090+5080のローカルAI環境構築。中小企業AI活用を月額定額サポート。哲学：「象の力を借りるハエ」。目標：月額顧客25件。
+【文体】一人称「私」。です・ます調。数字と具体例必須。##見出しOK。最後にCTA必須：${SDR_URL}
+note記事：1200〜1800字。Xポスト：140字以内。
+必ずJSON形式のみで出力（コードブロック不要）：
+{"title":"タイトル","note_body":"本文(\\n改行)","note_tags":["タグ1","タグ2","タグ3","タグ4","タグ5"],"x_post":"Xポスト140字以内","x_hashtags":["#タグ1","#タグ2","#タグ3"]}`;
+
+function buildPrompt(angle,industry,index){
+  const map={
+    story:`実体験ベースの物語。30年ぶりにITに戻った56歳が${industry}のAI営業自動化をした話。`,
+    industry:`${industry}向けAI活用事例。業種特有の課題・解決策・月商削減数字。`,
+    number:`数字で語る。${industry}でのコスト・ROI・時間削減データ。`,
+    fail:`失敗から学んだAI活用。正直な失敗談と教訓。`,
+    phil:`「象の力を借りるハエ」哲学で語る中小企業のAI戦略。`,
+    local:`福島・沖縄二拠点経営×AI。地方×AIの可能性。`,
+    how:`${industry}でのAI導入ステップ。初心者向け具体的手順。`,
+    future:`5年後のAI×中小企業の未来予測。今から準備すべきこと。`,
+  };
+  return `角度：${map[angle]}\n記事番号：${index+1}\n\nJSON形式で生成してください。`;
+}
+
+async function generateOne(angle,industry,index){
+  const res=await fetch(PROXY_URL,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,system:SYSTEM,
+      messages:[{role:"user",content:buildPrompt(angle,industry,index)}]})});
+  const data=await res.json();
+  const text=data.content?.map(b=>b.text||"").join("")||"";
+  return JSON.parse(text.replace(/```json|```/g,"").trim());
+}
+
+const C={bg:"#f5f0e8",card:"#fff",accent:"#c05a2e",accentDark:"#9e4623",
+  text:"#1a1a1a",dim:"#555",muted:"#999",border:"#e0d8d0",green:"#3a8f6e",surface:"#faf7f2"};
+
+function App(){
+  const [count,setCount]=useState(5);
+  const [angle,setAngle]=useState("all");
+  const [industry,setIndustry]=useState("all");
+  const [articles,setArticles]=useState([]);
+  const [running,setRunning]=useState(false);
+  const [progress,setProgress]=useState(0);
+  const [selected,setSelected]=useState(null);
+  const [copied,setCopied]=useState("");
+  const [tab,setTab]=useState("note");
+
+  const generate=useCallback(async()=>{
+    setRunning(true);setArticles([]);setProgress(0);
+    const results=[];
+    const angles=ANGLES.map(a=>a.id);
+    for(let i=0;i<count;i++){
+      const a=angle==="all"?angles[i%angles.length]:angle;
+      const ind=industry==="all"?INDUSTRIES[i%INDUSTRIES.length]:industry;
+      try{
+        const art=await generateOne(a,ind,i);
+        art._angle=a;art._industry=ind;art._id=i;
+        results.push(art);setArticles([...results]);setProgress(i+1);
+      }catch(e){console.error(i,e);}
+      await new Promise(r=>setTimeout(r,700));
+    }
+    setRunning(false);
+  },[count,angle,industry]);
+
+  const copyText=(text,key)=>{navigator.clipboard.writeText(text);setCopied(key);setTimeout(()=>setCopied(""),2000);};
+
+  const downloadCSV=()=>{
+    const h="番号,角度,業種,タイトル,note本文,noteタグ,Xポスト,Xハッシュタグ\n";
+    const rows=articles.map((a,i)=>`${i+1},${a._angle},${a._industry},"${(a.title||"").replace(/"/g,'""')}","${(a.note_body||"").replace(/\n/g,"\\n").replace(/"/g,'""')}","${(a.note_tags||[]).join(" ")}","${(a.x_post||"").replace(/"/g,'""')}","${(a.x_hashtags||[]).join(" ")}"`).join("\n");
+    const blob=new Blob(["\uFEFF"+h+rows],{type:"text/csv;charset=utf-8"});
+    const url=URL.createObjectURL(blob);const el=document.createElement("a");
+    el.href=url;el.download=`aidoctor_${articles.length}本.csv`;el.click();
+  };
+
+  return (
+    <div style={{minHeight:"100vh",background:C.bg,paddingBottom:60}}>
+      <div style={{background:C.card,borderBottom:`1px solid ${C.border}`,padding:"14px 20px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.04)"}}>
+        <div style={{width:34,height:34,borderRadius:"50%",background:`linear-gradient(135deg,${C.accent},${C.accentDark})`,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:16}}>🔫</div>
+        <div>
+          <div style={{fontSize:14,fontWeight:800,color:C.text}}>コンテンツ機関銃</div>
+          <div style={{fontSize:10,color:C.muted}}>note × X 飽和投稿エンジン by AIの町医者</div>
+        </div>
+        {articles.length>0&&<button onClick={downloadCSV} style={{marginLeft:"auto",padding:"7px 14px",borderRadius:8,background:C.green,color:"#fff",fontWeight:700,fontSize:12,border:"none",cursor:"pointer"}}>📥 CSV ({articles.length}本)</button>}
+      </div>
+
+      <div style={{maxWidth:900,margin:"0 auto",padding:"20px 16px"}}>
+        <div style={{background:C.card,borderRadius:16,border:`1px solid ${C.border}`,padding:20,marginBottom:16}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.accent,marginBottom:14,letterSpacing:"0.08em"}}>⚙️ 生成設定</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14}}>
+            <div>
+              <label style={{fontSize:11,color:C.dim,display:"block",marginBottom:5}}>生成本数</label>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                {[5,10,20,50,100].map(n=>(
+                  <button key={n} onClick={()=>setCount(n)} style={{padding:"5px 12px",borderRadius:6,fontSize:12,fontWeight:700,cursor:"pointer",background:count===n?C.accent:C.surface,color:count===n?"#fff":C.text,border:`1px solid ${count===n?C.accent:C.border}`}}>{n}本</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label style={{fontSize:11,color:C.dim,display:"block",marginBottom:5}}>角度</label>
+              <select value={angle} onChange={e=>setAngle(e.target.value)} style={{width:"100%",padding:"7px 10px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:12,color:C.text}}>
+                <option value="all">🔄 全角度ミックス</option>
+                {ANGLES.map(a=><option key={a.id} value={a.id}>{a.icon} {a.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{fontSize:11,color:C.dim,display:"block",marginBottom:5}}>業種</label>
+              <select value={industry} onChange={e=>setIndustry(e.target.value)} style={{width:"100%",padding:"7px 10px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:12,color:C.text}}>
+                <option value="all">🔄 全業種ミックス</option>
+                {INDUSTRIES.map(ind=><option key={ind} value={ind}>{ind}</option>)}
+              </select>
+            </div>
+          </div>
+          <button onClick={generate} disabled={running} style={{marginTop:16,width:"100%",padding:"13px 0",borderRadius:12,background:running?C.muted:`linear-gradient(135deg,${C.accent},${C.accentDark})`,color:"#fff",fontWeight:800,fontSize:14,border:"none",cursor:running?"not-allowed":"pointer",boxShadow:running?"none":`0 4px 20px rgba(192,90,46,0.3)`}}>
+            {running?`🔄 生成中... ${progress}/${count}本`:`🔫 ${count}本一括生成スタート`}
+          </button>
+          {running&&<div style={{marginTop:10,height:5,background:C.border,borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:`${(progress/count)*100}%`,background:`linear-gradient(90deg,${C.accent},${C.green})`,transition:"width 0.5s",borderRadius:3}}/></div>}
+        </div>
+
+        {articles.length>0&&(
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:C.dim,marginBottom:10}}>✅ {articles.length}本完了 — クリックして確認・コピー</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:8}}>
+              {articles.map((art,i)=>{
+                const ang=ANGLES.find(a=>a.id===art._angle);
+                return(
+                  <div key={i} onClick={()=>setSelected(art)} style={{padding:12,borderRadius:10,background:C.card,border:`1px solid ${selected?._id===art._id?C.accent:C.border}`,cursor:"pointer",boxShadow:selected?._id===art._id?`0 0 0 2px ${C.accent}`:"none"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5}}>
+                      <span style={{fontSize:12}}>{ang?.icon}</span>
+                      <span style={{fontSize:10,padding:"1px 6px",borderRadius:4,background:"rgba(192,90,46,0.1)",color:C.accent,fontWeight:600}}>{ang?.label}</span>
+                      <span style={{fontSize:10,color:C.muted}}>{art._industry}</span>
+                    </div>
+                    <div style={{fontSize:12,fontWeight:700,color:C.text,lineHeight:1.4}}>{art.title}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {selected&&(
+          <div style={{background:C.card,borderRadius:16,border:`1px solid ${C.border}`,padding:20}}>
+            <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:14}}>
+              <div style={{fontSize:15,fontWeight:800,color:C.text,flex:1,paddingRight:12}}>{selected.title}</div>
+              <button onClick={()=>setSelected(null)} style={{background:"none",border:"none",cursor:"pointer",fontSize:16,color:C.muted}}>✕</button>
+            </div>
+            <div style={{display:"flex",gap:4,marginBottom:14,borderBottom:`1px solid ${C.border}`,paddingBottom:10}}>
+              {[["note","📝 note記事"],["x","🐦 Xポスト"]].map(([t,l])=>(
+                <button key={t} onClick={()=>setTab(t)} style={{padding:"5px 14px",borderRadius:6,fontSize:12,fontWeight:700,cursor:"pointer",background:tab===t?C.accent:"transparent",color:tab===t?"#fff":C.dim,border:`1px solid ${tab===t?C.accent:C.border}`}}>{l}</button>
+              ))}
+            </div>
+            {tab==="note"&&(
+              <div>
+                <div style={{marginBottom:10}}>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:3}}>タイトル</div>
+                  <div style={{display:"flex",gap:6}}>
+                    <div style={{flex:1,padding:"8px 10px",borderRadius:8,background:C.surface,border:`1px solid ${C.border}`,fontSize:13,fontWeight:700,color:C.text}}>{selected.title}</div>
+                    <button onClick={()=>copyText(selected.title,"title")} style={{padding:"8px 10px",borderRadius:8,background:copied==="title"?C.green:C.surface,color:copied==="title"?"#fff":C.dim,border:`1px solid ${C.border}`,cursor:"pointer",fontSize:11,whiteSpace:"nowrap"}}>{copied==="title"?"✅":"📋コピー"}</button>
+                  </div>
+                </div>
+                <div style={{marginBottom:10}}>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:3}}>本文</div>
+                  <div style={{display:"flex",gap:6,alignItems:"flex-start"}}>
+                    <textarea readOnly value={selected.note_body} rows={10} style={{flex:1,padding:"8px 10px",borderRadius:8,background:C.surface,border:`1px solid ${C.border}`,fontSize:12,color:C.text,resize:"vertical",lineHeight:1.7}}/>
+                    <button onClick={()=>copyText(selected.note_body,"body")} style={{padding:"8px 10px",borderRadius:8,background:copied==="body"?C.green:C.surface,color:copied==="body"?"#fff":C.dim,border:`1px solid ${C.border}`,cursor:"pointer",fontSize:11,whiteSpace:"nowrap"}}>{copied==="body"?"✅":"📋コピー"}</button>
+                  </div>
+                </div>
+                <div>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:4}}>noteタグ</div>
+                  <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                    {(selected.note_tags||[]).map((tag,i)=>(
+                      <span key={i} style={{padding:"3px 8px",borderRadius:20,background:"rgba(192,90,46,0.1)",color:C.accent,fontSize:11,fontWeight:600}}>{tag}</span>
+                    ))}
+                    <button onClick={()=>copyText((selected.note_tags||[]).join(" "),"tags")} style={{padding:"3px 8px",borderRadius:20,background:copied==="tags"?C.green:C.surface,color:copied==="tags"?"#fff":C.dim,fontSize:10,border:`1px solid ${C.border}`,cursor:"pointer"}}>{copied==="tags"?"✅全コピー":"全コピー"}</button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {tab==="x"&&(
+              <div>
+                <div style={{marginBottom:10}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                    <div style={{fontSize:10,color:C.muted}}>Xポスト</div>
+                    <div style={{fontSize:10,color:(selected.x_post||"").length>120?C.accent:C.muted}}>{(selected.x_post||"").length}字</div>
+                  </div>
+                  <div style={{display:"flex",gap:6,alignItems:"flex-start"}}>
+                    <textarea readOnly value={selected.x_post} rows={4} style={{flex:1,padding:"8px 10px",borderRadius:8,background:C.surface,border:`1px solid ${C.border}`,fontSize:13,color:C.text,resize:"vertical"}}/>
+                    <button onClick={()=>copyText(selected.x_post,"xpost")} style={{padding:"8px 10px",borderRadius:8,background:copied==="xpost"?C.green:C.surface,color:copied==="xpost"?"#fff":C.dim,border:`1px solid ${C.border}`,cursor:"pointer",fontSize:11,whiteSpace:"nowrap"}}>{copied==="xpost"?"✅":"📋コピー"}</button>
+                  </div>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:4}}>Xハッシュタグ</div>
+                  <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                    {(selected.x_hashtags||[]).map((tag,i)=>(
+                      <span key={i} style={{padding:"3px 8px",borderRadius:20,background:"rgba(29,161,242,0.1)",color:"#1da1f2",fontSize:11,fontWeight:600}}>{tag}</span>
+                    ))}
+                    <button onClick={()=>copyText((selected.x_hashtags||[]).join(" "),"xtags")} style={{padding:"3px 8px",borderRadius:20,background:copied==="xtags"?C.green:C.surface,color:copied==="xtags"?"#fff":C.dim,fontSize:10,border:`1px solid ${C.border}`,cursor:"pointer"}}>{copied==="xtags"?"✅全コピー":"全コピー"}</button>
+                  </div>
+                </div>
+                <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent((selected.x_post||"")+"\n"+(selected.x_hashtags||[]).join(" "))}`} target="_blank" rel="noopener" style={{display:"inline-flex",alignItems:"center",gap:6,padding:"8px 16px",borderRadius:8,background:"#1da1f2",color:"#fff",fontWeight:700,fontSize:12,textDecoration:"none"}}>🐦 Xで今すぐ投稿</a>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
