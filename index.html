@@ -29,6 +29,12 @@ const ANGLES = [
 ];
 const FAIL_ANGLE = {id:"fail", label:"失敗談", icon:"💥"};
 const INDUSTRIES = ["飲食店","建設業","不動産業","介護・福祉","小売業","美容サロン","農業","製造業","士業","整骨院・整体"];
+const SEASONS = [
+  {id:"spring", label:"春", icon:"🌸", hint:"新年度・新生活・桜・出会いと別れ・新規開拓"},
+  {id:"summer", label:"夏", icon:"☀️", hint:"繁忙期・夏休み・暑さ対策・省エネ・お盆商戦"},
+  {id:"autumn", label:"秋", icon:"🍂", hint:"決算期・食欲の秋・値上げ・年末準備・収穫"},
+  {id:"winter", label:"冬", icon:"❄️", hint:"年末年始・忘新年会・節税・寒さ・来期計画"},
+];
 
 const C = {
   bg:"#f5f0e8", card:"#fff", accent:"#c05a2e", accentDark:"#9e4623",
@@ -60,7 +66,7 @@ function buildPrompt(angle,industry,index,isFail){
   return "角度："+(map[angle]||map.story)+"\\n記事番号："+(index+1)+"\\nJSON形式のみで出力。";
 }
 
-async function generateOne(angle,industry,index,isFail){
+async function generateOne(angle,industry,index,isFail,season){
   const res=await fetch(PROXY_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,system:isFail?FAIL_SYSTEM:SYSTEM,messages:[{role:"user",content:buildPrompt(angle,industry,index,isFail)}]})});
   const data=await res.json();
   const text=data.content?.map(b=>b.text||"").join("")||"";
@@ -85,6 +91,7 @@ function App(){
   const [count,setCount]=useState(5);
   const [angle,setAngle]=useState("all");
   const [industry,setIndustry]=useState("all");
+  const [season,setSeason]=useState("all");
   const [articles,setArticles]=useState([]);
   const [running,setRunning]=useState(false);
   const [progress,setProgress]=useState(0);
@@ -99,9 +106,10 @@ function App(){
       const isFail=(i+1)%5===0;
       const a=isFail?FAIL_ANGLE.id:(angle==="all"?angles[i%angles.length]:angle);
       const ind=industry==="all"?inds[i%inds.length]:industry;
+      const seas=season==="all"?SEASONS[i%SEASONS.length]:SEASONS.find(s=>s.id===season)||SEASONS[i%SEASONS.length];
       try{
-        const art=await generateOne(a,ind,i,isFail);
-        art._angle=a;art._industry=ind;art._id=i;art._isFail=isFail;
+        const art=await generateOne(a,ind,i,isFail,seas);
+        art._angle=a;art._industry=ind;art._id=i;art._isFail=isFail;art._season=seas;
         results.push(art);setArticles([...results]);setProgress(i+1);
       }catch(e){console.error(i,e);}
       await new Promise(r=>setTimeout(r,750));
@@ -149,6 +157,13 @@ function App(){
               <select value={industry} onChange={e=>setIndustry(e.target.value)} style={{width:"100%",padding:"7px 10px",borderRadius:8,border:"1px solid "+C.border,background:C.surface,fontSize:12,color:C.text}}>
                 <option value="all">🔄 全業種ミックス</option>
                 {INDUSTRIES.map(ind=><option key={ind} value={ind}>{ind}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{fontSize:11,color:C.dim,display:"block",marginBottom:5}}>季節</label>
+              <select value={season} onChange={e=>setSeason(e.target.value)} style={{width:"100%",padding:"7px 10px",borderRadius:8,border:"1px solid "+C.border,background:C.surface,fontSize:12,color:C.text}}>
+                <option value="all">🔄 四季ミックス</option>
+                {SEASONS.map(s=><option key={s.id} value={s.id}>{s.icon} {s.label}（{s.hint.substring(0,12)}…）</option>)}
               </select>
             </div>
           </div>
@@ -290,35 +305,42 @@ function App(){
 ══════════════════════════════════════════ */
 
 async function generateImage(prompt, filename, dirHandle) {
-  // Worker経由でDALL-E 3生成 → Worker側で画像fetchしてbase64返却（CORS完全回避）
-  const res = await fetch(PROXY_URL+"/openai-image", {
-    method: "POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({prompt:prompt, size:"1792x1024", quality:"standard"})
+  // Step1: WorkerでDALL-E 3生成 → URL取得（Worker負荷を分散）
+  const genRes = await fetch(PROXY_URL+"/openai-image", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({prompt:prompt, size:"1792x1024", quality:"standard"})
   });
-  if (!res.ok) {const e=await res.json();throw new Error(e.error?.message||"API Error "+res.status);}
-  const data = await res.json();
-  if (!data.success || !data.base64) throw new Error(data.error||"画像データ取得失敗");
+  if (!genRes.ok) {const e=await genRes.json();throw new Error(e.error?.message||"生成エラー "+genRes.status);}
+  const genData = await genRes.json();
+  const imgUrl = genData.url;
+  if (!imgUrl) throw new Error(genData.error||"URL取得失敗: "+JSON.stringify(genData).substring(0,100));
 
-  // base64 → Blob
-  const bin = atob(data.base64);
+  // Step2: WorkerでURL→バイナリ取得（CORS回避）
+  const fetchRes = await fetch(PROXY_URL+"/fetch-image", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({url:imgUrl})
+  });
+  if (!fetchRes.ok) throw new Error("画像fetch失敗 "+fetchRes.status);
+  const fetchData = await fetchRes.json();
+  if (!fetchData.base64) throw new Error("base64取得失敗");
+
+  // base64 → Blob → 保存
+  const bin = atob(fetchData.base64);
   const bytes = new Uint8Array(bin.length);
   for (let i=0; i<bin.length; i++) bytes[i] = bin.charCodeAt(i);
   const blob = new Blob([bytes], {type:"image/png"});
 
-  // フォルダに保存 or ダウンロード
   if (dirHandle) {
     const fh = await dirHandle.getFileHandle(filename, {create:true});
     const wr = await fh.createWritable();
-    await wr.write(blob);
-    await wr.close();
+    await wr.write(blob); await wr.close();
   } else {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href=url; a.download=filename; a.click();
     URL.revokeObjectURL(url);
   }
-  return data.url;
+  return imgUrl;
 }
 
 function ImageGenPanel({articles}) {
