@@ -49,7 +49,7 @@ const SYSTEM = `あなたは「AIの町医者」高橋秀夫（56歳、福島・
 note記事：1200〜1800字。Xポスト：140字以内。
 
 必ずJSON形式のみで出力（コードブロック不要）：
-{"title":"タイトル","note_body":"note記事本文(改行は\\n)","note_tags":["タグ1","タグ2","タグ3","タグ4","タグ5"],"x_post":"Xポスト140字以内","x_hashtags":["#タグ1","#タグ2","#タグ3"],"img_prompt_no_text":"ChatGPT/DALL-E向け英語プロンプト。テキスト一切なし。note記事ヘッダー画像。1600x900px。明るくプロフェッショナルなビジュアル。200字以内。","img_prompt_with_text":"ChatGPT/DALL-E向け英語プロンプト。画像内に日本語キャッチコピーを大きく配置する指示を含む。記事タイトルの核心を15字以内で画像テキストとして指定。1600x900px。250字以内。"}`;
+{"title":"タイトル","note_body":"note記事本文(改行は\\n)","note_tags":["タグ1","タグ2","タグ3","タグ4","タグ5"],"x_post":"Xポスト140字以内","x_hashtags":["#タグ1","#タグ2","#タグ3"],"img_prompt_no_text":"ChatGPT/DALL-E向け英語プロンプト。テキスト一切なし。note記事ヘッダー画像。1600x900px。明るくプロフェッショナルなビジュアル。200字以内。必ず末尾に: No text, no letters, no words, no characters, no watermarks, no captions anywhere in the image.","img_prompt_with_text":"ChatGPT/DALL-E向け英語プロンプト（テキスト合成はCanvas側で行うためこちらもテキストなし）。記事の雰囲気・業種に合わせたビジュアル。1600x900px。200字以内。必ず末尾に: No text, no letters, no words, no characters, no signs, no watermarks anywhere in the image."}`;
 
 const FAIL_SYSTEM = `あなたは「AIの町医者」高橋秀夫（56歳、福島・沖縄二拠点、AI活用コンサル）の代筆ライターです。
 【重要】これは「失敗談・遠回り話」専用記事です。成功話ではなく、正直な失敗・恥ずかしい遠回り・やらかしを書く。自虐OK、でも最後は学びで終わる。最後にCTA必須：" + SDR_URL + "
@@ -58,7 +58,7 @@ note記事：1000〜1500字。Xポスト：140字以内。
 テーマ例（毎回違うものを選んで）：最初に作ったチャットボットが全く使えなかった話/AIに頼りすぎて大事なことを見落とした話/30年ブランクのITおじさんが犯した初歩的ミスの数々/見積もりを大幅に外して赤字になりかけた話/自動化しようとして逆に手間が増えた話
 
 必ずJSON形式のみで出力（コードブロック不要）：
-{"title":"タイトル（失敗感が伝わるもの）","note_body":"note記事本文(改行は\\n)","note_tags":["タグ1","タグ2","タグ3","タグ4","タグ5"],"x_post":"Xポスト140字以内（失敗ネタで共感を誘う）","x_hashtags":["#タグ1","#タグ2","#タグ3"],"img_prompt_no_text":"ChatGPT/DALL-E向け英語プロンプト。テキスト一切なし。失敗・遠回りの雰囲気が出るユーモラスなイラスト風画像。1600x900px。200字以内。","img_prompt_with_text":"ChatGPT/DALL-E向け英語プロンプト。失敗感のある日本語キャッチコピーを画像内に大きく配置する指示含む。1600x900px。250字以内。"}`;
+{"title":"タイトル（失敗感が伝わるもの）","note_body":"note記事本文(改行は\\n)","note_tags":["タグ1","タグ2","タグ3","タグ4","タグ5"],"x_post":"Xポスト140字以内（失敗ネタで共感を誘う）","x_hashtags":["#タグ1","#タグ2","#タグ3"],"img_prompt_no_text":"ChatGPT/DALL-E向け英語プロンプト。テキスト一切なし。失敗・遠回りの雰囲気が出るユーモラスなイラスト風画像。1600x900px。200字以内。必ず末尾に: No text, no letters, no words, no characters, no watermarks anywhere in the image.","img_prompt_with_text":"ChatGPT/DALL-E向け英語プロンプト（テキスト合成はCanvas側で行う）。失敗・遠回りの雰囲気が出るユーモラスなイラスト風画像。1600x900px。200字以内。必ず末尾に: No text, no letters, no words, no characters, no watermarks anywhere in the image."}`;
 
 function buildPrompt(angle,industry,index,isFail){
   if(isFail) return "失敗談記事を生成してください。記事番号："+(index+1)+"\\nJSON形式のみで出力。";
@@ -399,7 +399,7 @@ async function generateImage(prompt, filename, dirHandle, title) {
   // Step1: WorkerでDALL-E 3生成 → URL取得（Worker負荷を分散）
   const genRes = await fetch(PROXY_URL+"/openai-image", {
     method:"POST", headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({prompt:prompt, size:"1792x1024", quality:"standard"})
+    body:JSON.stringify({prompt: prompt + " IMPORTANT: No text, no letters, no words, no characters, no signs, no watermarks, no captions of any kind anywhere in the image.", size:"1792x1024", quality:"standard"})
   });
   if (!genRes.ok) {const e=await genRes.json();throw new Error(e.error?.message||"生成エラー "+genRes.status);}
   const genData = await genRes.json();
