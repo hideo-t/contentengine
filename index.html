@@ -290,33 +290,35 @@ function App(){
 ══════════════════════════════════════════ */
 
 async function generateImage(prompt, filename, dirHandle) {
-  const key = localStorage.getItem("openai_api_key");
-  if (!key) throw new Error("APIキー未設定");
+  // Worker経由でDALL-E 3生成 → Worker側で画像fetchしてbase64返却（CORS完全回避）
   const res = await fetch(PROXY_URL+"/openai-image", {
     method: "POST",
     headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({model:"dall-e-3",prompt:prompt,n:1,size:"1792x1024",quality:"standard",response_format:"url"})
+    body: JSON.stringify({prompt:prompt, size:"1792x1024", quality:"standard"})
   });
-  if (!res.ok) {const e=await res.json();throw new Error(e.error?.message||"API Error");}
+  if (!res.ok) {const e=await res.json();throw new Error(e.error?.message||"API Error "+res.status);}
   const data = await res.json();
-  const imgUrl = data.data[0].url;
-  // 画像をfetchしてバイナリに変換
-  const imgRes = await fetch(imgUrl);
-  const blob = await imgRes.blob();
-  // フォルダに保存
+  if (!data.success || !data.base64) throw new Error(data.error||"画像データ取得失敗");
+
+  // base64 → Blob
+  const bin = atob(data.base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i=0; i<bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const blob = new Blob([bytes], {type:"image/png"});
+
+  // フォルダに保存 or ダウンロード
   if (dirHandle) {
-    const fileHandle = await dirHandle.getFileHandle(filename, {create:true});
-    const writable = await fileHandle.createWritable();
-    await writable.write(blob);
-    await writable.close();
+    const fh = await dirHandle.getFileHandle(filename, {create:true});
+    const wr = await fh.createWritable();
+    await wr.write(blob);
+    await wr.close();
   } else {
-    // フォルダ未選択の場合はダウンロード
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href=url; a.download=filename; a.click();
     URL.revokeObjectURL(url);
   }
-  return imgUrl;
+  return data.url;
 }
 
 function ImageGenPanel({articles}) {
@@ -341,7 +343,6 @@ function ImageGenPanel({articles}) {
   };
 
   const runAll = async () => {
-    if (!localStorage.getItem("openai_api_key")) { alert("OpenAI APIキーを先に保存してください"); return; }
     if (articles.length === 0) { alert("先に記事を生成してください"); return; }
     setRunning(true); setProgress(0); setLog([]);
     const addLog = (msg) => setLog(prev=>[...prev, msg]);
@@ -374,16 +375,10 @@ function ImageGenPanel({articles}) {
     <div style={{background:C2.card,borderRadius:16,border:"1px solid "+C2.border,padding:20,marginBottom:16}}>
       <div style={{fontSize:12,fontWeight:700,color:C2.accent,marginBottom:14,letterSpacing:"0.08em"}}>🖼 DALL-E 3 一括画像生成</div>
 
-      {/* APIキー設定 */}
-      <div style={{marginBottom:12}}>
-        <label style={{fontSize:11,color:C2.dim,display:"block",marginBottom:4}}>OpenAI APIキー（platform.openai.com）</label>
-        <div style={{display:"flex",gap:6}}>
-          <input type={keyVisible?"text":"password"} value={apiKey} onChange={e=>setApiKey(e.target.value)}
-            placeholder="sk-proj-..." style={{flex:1,padding:"8px 10px",borderRadius:8,border:"1px solid "+C2.border,background:C2.surface,fontSize:12,color:C2.text,fontFamily:"monospace"}}/>
-          <button onClick={()=>setKeyVisible(!keyVisible)} style={{padding:"8px 10px",borderRadius:8,background:C2.surface,border:"1px solid "+C2.border,cursor:"pointer",fontSize:11,color:C2.dim}}>{keyVisible?"🙈":"👁"}</button>
-          <button onClick={saveKey} style={{padding:"8px 14px",borderRadius:8,background:C2.green,color:"#fff",fontWeight:700,fontSize:11,border:"none",cursor:"pointer"}}>保存</button>
-        </div>
-        <div style={{fontSize:10,color:C2.muted,marginTop:3}}>※ APIキーはCloudflare Workerの環境変数で管理。ここでの入力は不要です。</div>
+      {/* APIキー設定 — Workerで管理済み */}
+      <div style={{marginBottom:12,padding:"8px 12px",borderRadius:8,background:"rgba(58,143,110,0.08)",border:"1px solid rgba(58,143,110,0.2)"}}>
+        <div style={{fontSize:11,color:C2.green,fontWeight:600}}>✅ APIキーはCloudflare Worker（aisdr-proxy）の環境変数で管理済み</div>
+        <div style={{fontSize:10,color:C2.muted,marginTop:2}}>1枚約¥6〜12円（standard 1792x1024）</div>
       </div>
 
       {/* フォルダ選択 */}
