@@ -366,8 +366,7 @@ function compositeImage(base64, title, authorLine) {
           const next = chars[i + 1] || "";
 
           // 強制改行（タイトルに改行コードが含まれる場合）
-          if (ch === "
-") {
+          if (ch === "\n") {
             lines.push(cur); cur = ""; lastBreakPos = 0; lastBreakLine = "";
             continue;
           }
