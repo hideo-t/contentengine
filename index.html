@@ -352,13 +352,47 @@ function compositeImage(base64, title, authorLine) {
 
       // 日本語テキストの折り返し計算
       function measureLines(text, maxW) {
+        // 区切り優先順位: 句読点・助詞・接続詞の後で折る
+        const BREAK_AFTER  = new Set(["。","、","！","？","…","・","：","；","）","】","」","』","—"]);
+        const BREAK_BEFORE = new Set(["「","『","【","（","—"]);
         const lines = [];
         const chars = text.split("");
         let cur = "";
-        for (const ch of chars) {
-          if (ctx.measureText(cur + ch).width > maxW && cur) {
-            lines.push(cur); cur = ch;
-          } else { cur += ch; }
+        let lastBreakPos = 0;
+        let lastBreakLine = "";
+
+        for (let i = 0; i < chars.length; i++) {
+          const ch = chars[i];
+          const next = chars[i + 1] || "";
+
+          // 強制改行（タイトルに改行コードが含まれる場合）
+          if (ch === "
+") {
+            lines.push(cur); cur = ""; lastBreakPos = 0; lastBreakLine = "";
+            continue;
+          }
+
+          const candidate = cur + ch;
+
+          if (ctx.measureText(candidate).width > maxW && cur) {
+            // 区切り良い場所が記録されていればそこで折る
+            if (lastBreakLine && lastBreakLine.length > 2) {
+              lines.push(lastBreakLine);
+              cur = candidate.slice(lastBreakLine.length);
+            } else {
+              lines.push(cur);
+              cur = ch;
+            }
+            lastBreakPos = 0; lastBreakLine = "";
+          } else {
+            cur = candidate;
+          }
+
+          // 区切り候補を記録（句読点の直後、または助詞的な2文字パターンの後）
+          if (BREAK_AFTER.has(ch) && !BREAK_BEFORE.has(next)) {
+            lastBreakLine = cur;
+            lastBreakPos = i;
+          }
         }
         if (cur) lines.push(cur);
         return lines;
